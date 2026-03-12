@@ -1,0 +1,14 @@
+# Docker volumes
+wordpress_data/
+db_data/
+
+# WordPress debug log
+debug.log
+
+# Database backups
+*.sql
+
+# OS files
+.DS_Store
+Thumbs.db
+

@@ -1,0 +1,91 @@
+services:
+  # MySQL Database
+  db:
+    image: mysql:8.0
+    container_name: bmwoo_mysql
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: wordpress
+      MYSQL_ROOT_PASSWORD: rootpassword
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - bmwoo_network
+    ports:
+      - "3307:3306"
+
+  # WordPress
+  wordpress:
+    depends_on:
+      - db
+    image: wordpress:latest
+    container_name: bmwoo_wordpress
+    restart: unless-stopped
+    ports:
+      - "8082:80"
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DEBUG: 1
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_DEBUG', true);
+        define('WP_DEBUG_LOG', true);
+        define('WP_DEBUG_DISPLAY', false);
+        define('SCRIPT_DEBUG', true);
+    volumes:
+      # Mount individual plugins
+      - ./woo-edit-order-item-size:/var/www/html/wp-content/plugins/woo-edit-order-item-size
+      - ./woo-order-category-filter:/var/www/html/wp-content/plugins/woo-order-category-filter
+      # Mount WordPress data (themes, uploads, etc.)
+      - wordpress_data:/var/www/html
+    networks:
+      - bmwoo_network
+
+  # phpMyAdmin (for database management)
+  phpmyadmin:
+    depends_on:
+      - db
+    image: phpmyadmin:latest
+    container_name: bmwoo_phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "8083:80"
+    environment:
+      PMA_HOST: db
+      MYSQL_ROOT_PASSWORD: rootpassword
+    networks:
+      - bmwoo_network
+
+  # WP-CLI (for command line WordPress management)
+  wpcli:
+    depends_on:
+      - wordpress
+      - db
+    image: wordpress:cli
+    container_name: bmwoo_wpcli
+    user: "33:33"
+    volumes:
+      - ./woo-edit-order-item-size:/var/www/html/wp-content/plugins/woo-edit-order-item-size
+      - ./woo-order-category-filter:/var/www/html/wp-content/plugins/woo-order-category-filter
+      - wordpress_data:/var/www/html
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+    networks:
+      - bmwoo_network
+    command: tail -f /dev/null
+
+volumes:
+  db_data:
+  wordpress_data:
+
+networks:
+  bmwoo_network:
+    driver: bridge
