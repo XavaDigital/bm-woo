@@ -91,17 +91,41 @@ class WooOrderCategoryExport {
                 <table class="form-table">
                     <tr>
                         <th scope="row">
-                            <label for="category"><?php _e('Product Category', 'woo-order-category-export'); ?></label>
+                            <label><?php _e('Product Categories', 'woo-order-category-export'); ?></label>
                         </th>
                         <td>
-                            <select name="category" id="category" required>
-                                <option value=""><?php _e('Select a category...', 'woo-order-category-export'); ?></option>
+                            <div style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; background: #fff;">
+                                <p style="margin-top: 0;">
+                                    <label>
+                                        <input type="checkbox" id="select_all_categories" style="margin-right: 5px;">
+                                        <strong><?php _e('Select All', 'woo-order-category-export'); ?></strong>
+                                    </label>
+                                </p>
+                                <hr style="margin: 10px 0;">
                                 <?php foreach ($categories as $category) : ?>
-                                    <option value="<?php echo esc_attr($category->term_id); ?>">
-                                        <?php echo esc_html($category->name); ?> (<?php echo $category->count; ?> products)
-                                    </option>
+                                    <p style="margin: 5px 0;">
+                                        <label>
+                                            <input type="checkbox" name="categories[]" class="category-checkbox" value="<?php echo esc_attr($category->term_id); ?>" style="margin-right: 5px;">
+                                            <?php echo esc_html($category->name); ?> <span style="color: #666;">(<?php echo $category->count; ?> products)</span>
+                                        </label>
+                                    </p>
                                 <?php endforeach; ?>
-                            </select>
+                            </div>
+                            <p class="description"><?php _e('Select one or more categories to export', 'woo-order-category-export'); ?></p>
+                            <script>
+                                jQuery(document).ready(function($) {
+                                    // Select/deselect all functionality
+                                    $('#select_all_categories').on('change', function() {
+                                        $('.category-checkbox').prop('checked', $(this).prop('checked'));
+                                    });
+
+                                    // Update "Select All" checkbox if individual checkboxes change
+                                    $('.category-checkbox').on('change', function() {
+                                        var allChecked = $('.category-checkbox:checked').length === $('.category-checkbox').length;
+                                        $('#select_all_categories').prop('checked', allChecked);
+                                    });
+                                });
+                            </script>
                         </td>
                     </tr>
                     <tr>
@@ -132,7 +156,7 @@ class WooOrderCategoryExport {
             <div class="notice notice-info inline">
                 <p>
                     <strong><?php _e('Note:', 'woo-order-category-export'); ?></strong>
-                    <?php _e('This will export all processing orders that contain at least one product from the selected category. Leave dates empty to export all orders, or specify a date range to filter.', 'woo-order-category-export'); ?>
+                    <?php _e('This will export all processing orders that contain at least one product from the selected categories. Leave dates empty to export all orders, or specify a date range to filter.', 'woo-order-category-export'); ?>
                 </p>
             </div>
         </div>
@@ -159,12 +183,14 @@ class WooOrderCategoryExport {
         }
 
         // Get form data
-        $category_id = isset($_POST['category']) ? intval($_POST['category']) : 0;
+        $category_ids = isset($_POST['categories']) && is_array($_POST['categories'])
+            ? array_map('intval', $_POST['categories'])
+            : array();
         $start_date = isset($_POST['start_date']) ? sanitize_text_field($_POST['start_date']) : '';
         $end_date = isset($_POST['end_date']) ? sanitize_text_field($_POST['end_date']) : '';
 
-        if (!$category_id) {
-            wp_die(__('Please select a category', 'woo-order-category-export'));
+        if (empty($category_ids)) {
+            wp_die(__('Please select at least one category', 'woo-order-category-export'));
         }
 
         // Build order query args
@@ -188,7 +214,7 @@ class WooOrderCategoryExport {
         // Get orders - ONLY processing orders
         $orders = wc_get_orders($order_args);
 
-        // Filter orders that contain products from the selected category
+        // Filter orders that contain products from ANY of the selected categories
         $filtered_orders = array();
         foreach ($orders as $order) {
             foreach ($order->get_items() as $item) {
@@ -197,7 +223,8 @@ class WooOrderCategoryExport {
                     $product_id = $product->get_parent_id() ? $product->get_parent_id() : $product->get_id();
                     $terms = wp_get_post_terms($product_id, 'product_cat', array('fields' => 'ids'));
 
-                    if (in_array($category_id, $terms)) {
+                    // Check if product belongs to any of the selected categories
+                    if (array_intersect($category_ids, $terms)) {
                         $filtered_orders[] = $order;
                         break; // Found a matching product, no need to check other items
                     }
@@ -206,7 +233,7 @@ class WooOrderCategoryExport {
         }
 
         // Generate CSV
-        $this->generate_csv($filtered_orders, $category_id, $start_date, $end_date);
+        $this->generate_csv($filtered_orders, $category_ids, $start_date, $end_date);
     }
 
     /**
@@ -214,8 +241,13 @@ class WooOrderCategoryExport {
      * Returns array of attribute labels (not technical keys)
      * Includes ALL custom fields from any plugin (WooCommerce Extra Product Options, etc.)
      */
-    private function get_all_attributes_in_range($orders, $category_id) {
+    private function get_all_attributes_in_range($orders, $category_ids) {
         $all_attributes = array();
+
+        // Ensure $category_ids is an array
+        if (!is_array($category_ids)) {
+            $category_ids = array($category_ids);
+        }
 
         // Meta keys to exclude (WooCommerce internal data that shouldn't be in the export)
         $excluded_keys = array(
@@ -230,11 +262,11 @@ class WooOrderCategoryExport {
                 $product = $item->get_product();
                 if (!$product) continue;
 
-                // Check if this product is in the selected category
+                // Check if this product is in any of the selected categories
                 $product_id = $product->get_parent_id() ? $product->get_parent_id() : $product->get_id();
                 $terms = wp_get_post_terms($product_id, 'product_cat', array('fields' => 'ids'));
 
-                if (!in_array($category_id, $terms)) {
+                if (!array_intersect($category_ids, $terms)) {
                     continue;
                 }
 
@@ -331,16 +363,36 @@ class WooOrderCategoryExport {
     /**
      * Generate CSV file
      */
-    private function generate_csv($orders, $category_id, $start_date, $end_date) {
-        // Get category name
-        $category = get_term($category_id, 'product_cat');
-        $category_name = $category ? $category->name : 'Unknown';
+    private function generate_csv($orders, $category_ids, $start_date, $end_date) {
+        // Ensure $category_ids is an array
+        if (!is_array($category_ids)) {
+            $category_ids = array($category_ids);
+        }
+
+        // Get category names
+        $category_names = array();
+        foreach ($category_ids as $cat_id) {
+            $category = get_term($cat_id, 'product_cat');
+            if ($category && !is_wp_error($category)) {
+                $category_names[] = $category->name;
+            }
+        }
+
+        // Build filename based on categories
+        if (count($category_names) === 1) {
+            $filename = 'orders-' . sanitize_title($category_names[0]);
+        } elseif (count($category_names) <= 3) {
+            // If 2-3 categories, include all names
+            $filename = 'orders-' . sanitize_title(implode('-', $category_names));
+        } else {
+            // If more than 3 categories, use "multiple-categories"
+            $filename = 'orders-multiple-categories';
+        }
 
         // Get all unique attributes (as display labels)
-        $all_attributes = $this->get_all_attributes_in_range($orders, $category_id);
+        $all_attributes = $this->get_all_attributes_in_range($orders, $category_ids);
 
-        // Build filename
-        $filename = 'orders-' . sanitize_title($category_name);
+        // Add date range to filename
         if (!empty($start_date) && !empty($end_date)) {
             $filename .= '-' . $start_date . '-to-' . $end_date;
         } elseif (!empty($start_date)) {
@@ -455,12 +507,12 @@ class WooOrderCategoryExport {
                 $product = $item->get_product();
                 if (!$product) continue;
 
-                // Check if this product is in the selected category
+                // Check if this product is in any of the selected categories
                 $product_id = $product->get_parent_id() ? $product->get_parent_id() : $product->get_id();
                 $terms = wp_get_post_terms($product_id, 'product_cat', array('fields' => 'ids'));
 
-                if (!in_array($category_id, $terms)) {
-                    continue; // Skip products not in the selected category
+                if (!array_intersect($category_ids, $terms)) {
+                    continue; // Skip products not in the selected categories
                 }
 
                 $product_name = $item->get_name();
