@@ -149,7 +149,7 @@ class WooOrderCategoryExport {
                 </table>
                 
                 <p class="submit">
-                    <input type="submit" name="export_orders" class="button button-primary" value="<?php _e('Export to CSV', 'woo-order-category-export'); ?>">
+                    <input type="submit" name="export_orders" class="button button-primary" value="<?php _e('Export to XLSX', 'woo-order-category-export'); ?>">
                 </p>
             </form>
             
@@ -232,8 +232,8 @@ class WooOrderCategoryExport {
             }
         }
 
-        // Generate CSV
-        $this->generate_csv($filtered_orders, $category_ids, $start_date, $end_date);
+        // Generate XLSX
+        $this->generate_xlsx($filtered_orders, $category_ids, $start_date, $end_date);
     }
 
     /**
@@ -361,9 +361,9 @@ class WooOrderCategoryExport {
     }
 
     /**
-     * Generate CSV file
+     * Generate XLSX file
      */
-    private function generate_csv($orders, $category_ids, $start_date, $end_date) {
+    private function generate_xlsx($orders, $category_ids, $start_date, $end_date) {
         // Ensure $category_ids is an array
         if (!is_array($category_ids)) {
             $category_ids = array($category_ids);
@@ -402,21 +402,9 @@ class WooOrderCategoryExport {
         } else {
             $filename .= '-all-time';
         }
-        $filename .= '.csv';
+        $filename .= '.xlsx';
 
-        // Set headers for download
-        header('Content-Type: text/csv; charset=utf-8');
-        header('Content-Disposition: attachment; filename=' . $filename);
-        header('Pragma: no-cache');
-        header('Expires: 0');
-
-        // Open output stream
-        $output = fopen('php://output', 'w');
-
-        // Add BOM for Excel UTF-8 support
-        fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
-
-        // Build CSV headers dynamically
+        // Build headers array dynamically
         $headers = array(
             'Order ID',
             'Order Number',
@@ -458,7 +446,8 @@ class WooOrderCategoryExport {
         $headers[] = 'Order Total';
         $headers[] = 'Payment Method';
 
-        fputcsv($output, $headers);
+        // Collect all data rows
+        $data_rows = array();
 
         // Add data rows
         foreach ($orders as $order) {
@@ -621,12 +610,202 @@ class WooOrderCategoryExport {
                 $row[] = $order_total;
                 $row[] = $payment_method;
 
-                fputcsv($output, $row);
+                $data_rows[] = $row;
             }
         }
 
-        fclose($output);
-        exit;
+        // Generate and output XLSX file
+        $this->output_xlsx($filename, $headers, $data_rows);
+    }
+
+    /**
+     * Output XLSX file using simple XML approach
+     */
+    private function output_xlsx($filename, $headers, $data_rows) {
+        // Create temporary directory for XLSX files
+        $temp_dir = sys_get_temp_dir() . '/xlsx_' . uniqid();
+        mkdir($temp_dir);
+        mkdir($temp_dir . '/_rels');
+        mkdir($temp_dir . '/docProps');
+        mkdir($temp_dir . '/xl');
+        mkdir($temp_dir . '/xl/_rels');
+        mkdir($temp_dir . '/xl/worksheets');
+
+        // Create [Content_Types].xml
+        $content_types = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n";
+        $content_types .= '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">';
+        $content_types .= '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>';
+        $content_types .= '<Default Extension="xml" ContentType="application/xml"/>';
+        $content_types .= '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>';
+        $content_types .= '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
+        $content_types .= '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>';
+        $content_types .= '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>';
+        $content_types .= '</Types>';
+        file_put_contents($temp_dir . '/[Content_Types].xml', $content_types);
+
+        // Create _rels/.rels
+        $rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n";
+        $rels .= '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+        $rels .= '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>';
+        $rels .= '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>';
+        $rels .= '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>';
+        $rels .= '</Relationships>';
+        file_put_contents($temp_dir . '/_rels/.rels', $rels);
+
+        // Create docProps/core.xml
+        $core = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n";
+        $core .= '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">';
+        $core .= '<dc:creator>WooCommerce Order Export</dc:creator>';
+        $core .= '<cp:lastModifiedBy>WooCommerce Order Export</cp:lastModifiedBy>';
+        $core .= '<dcterms:created xsi:type="dcterms:W3CDTF">' . date('Y-m-d\TH:i:s\Z') . '</dcterms:created>';
+        $core .= '<dcterms:modified xsi:type="dcterms:W3CDTF">' . date('Y-m-d\TH:i:s\Z') . '</dcterms:modified>';
+        $core .= '</cp:coreProperties>';
+        file_put_contents($temp_dir . '/docProps/core.xml', $core);
+
+        // Create docProps/app.xml
+        $app = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n";
+        $app .= '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">';
+        $app .= '<Application>WooCommerce Order Export</Application>';
+        $app .= '</Properties>';
+        file_put_contents($temp_dir . '/docProps/app.xml', $app);
+
+        // Create xl/_rels/workbook.xml.rels
+        $workbook_rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n";
+        $workbook_rels .= '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+        $workbook_rels .= '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>';
+        $workbook_rels .= '</Relationships>';
+        file_put_contents($temp_dir . '/xl/_rels/workbook.xml.rels', $workbook_rels);
+
+        // Create xl/workbook.xml
+        $workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n";
+        $workbook .= '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
+        $workbook .= '<sheets>';
+        $workbook .= '<sheet name="Orders" sheetId="1" r:id="rId1"/>';
+        $workbook .= '</sheets>';
+        $workbook .= '</workbook>';
+        file_put_contents($temp_dir . '/xl/workbook.xml', $workbook);
+
+        // Create xl/worksheets/sheet1.xml with data
+        $sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' . "\n";
+        $sheet .= '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+        $sheet .= '<sheetData>';
+
+        // Add header row
+        $sheet .= '<row r="1">';
+        $col = 0;
+        foreach ($headers as $header) {
+            $col++;
+            $cell_ref = $this->get_cell_reference($col, 1);
+            $sheet .= '<c r="' . $cell_ref . '" t="inlineStr"><is><t>' . $this->xml_escape($header) . '</t></is></c>';
+        }
+        $sheet .= '</row>';
+
+        // Add data rows
+        $row_num = 1;
+        foreach ($data_rows as $row_data) {
+            $row_num++;
+            $sheet .= '<row r="' . $row_num . '">';
+            $col = 0;
+            foreach ($row_data as $cell_value) {
+                $col++;
+                $cell_ref = $this->get_cell_reference($col, $row_num);
+                // Check if numeric
+                if (is_numeric($cell_value)) {
+                    $sheet .= '<c r="' . $cell_ref . '"><v>' . $cell_value . '</v></c>';
+                } else {
+                    $sheet .= '<c r="' . $cell_ref . '" t="inlineStr"><is><t>' . $this->xml_escape($cell_value) . '</t></is></c>';
+                }
+            }
+            $sheet .= '</row>';
+        }
+
+        $sheet .= '</sheetData>';
+        $sheet .= '</worksheet>';
+        file_put_contents($temp_dir . '/xl/worksheets/sheet1.xml', $sheet);
+
+        // Create ZIP archive
+        $zip = new ZipArchive();
+        $zip_path = $temp_dir . '/' . $filename;
+
+        if ($zip->open($zip_path, ZipArchive::CREATE) === TRUE) {
+            $this->add_directory_to_zip($zip, $temp_dir, '');
+            $zip->close();
+
+            // Output the file
+            header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            header('Content-Disposition: attachment; filename="' . $filename . '"');
+            header('Content-Length: ' . filesize($zip_path));
+            header('Pragma: no-cache');
+            header('Expires: 0');
+
+            readfile($zip_path);
+
+            // Clean up
+            $this->delete_directory($temp_dir);
+            exit;
+        } else {
+            // Fallback to CSV if ZIP fails
+            wp_die('Failed to create XLSX file. Please contact support.');
+        }
+    }
+
+    /**
+     * Get Excel cell reference (e.g., A1, B2, AA10)
+     */
+    private function get_cell_reference($col, $row) {
+        $letter = '';
+        while ($col > 0) {
+            $col--;
+            $letter = chr(65 + ($col % 26)) . $letter;
+            $col = floor($col / 26);
+        }
+        return $letter . $row;
+    }
+
+    /**
+     * Escape XML special characters
+     */
+    private function xml_escape($str) {
+        return htmlspecialchars($str, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+    }
+
+    /**
+     * Add directory contents to ZIP recursively
+     */
+    private function add_directory_to_zip($zip, $dir, $zip_path) {
+        $files = scandir($dir);
+        foreach ($files as $file) {
+            if ($file === '.' || $file === '..') continue;
+
+            $full_path = $dir . '/' . $file;
+            $relative_path = $zip_path . $file;
+
+            if (is_dir($full_path)) {
+                $this->add_directory_to_zip($zip, $full_path, $relative_path . '/');
+            } else {
+                $zip->addFile($full_path, $relative_path);
+            }
+        }
+    }
+
+    /**
+     * Recursively delete directory
+     */
+    private function delete_directory($dir) {
+        if (!file_exists($dir)) return;
+
+        $files = scandir($dir);
+        foreach ($files as $file) {
+            if ($file === '.' || $file === '..') continue;
+
+            $full_path = $dir . '/' . $file;
+            if (is_dir($full_path)) {
+                $this->delete_directory($full_path);
+            } else {
+                unlink($full_path);
+            }
+        }
+        rmdir($dir);
     }
 }
 
