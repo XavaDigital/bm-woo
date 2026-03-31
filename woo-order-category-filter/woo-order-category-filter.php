@@ -69,10 +69,10 @@ class WooOrderCategoryFilter {
      */
     public function add_category_filter_dropdown() {
         global $typenow;
-        
+
         // Only add filter on shop_order post type (WooCommerce orders)
         if ('shop_order' === $typenow || (function_exists('wc_get_page_screen_id') && wc_get_page_screen_id('shop-order') === get_current_screen()->id)) {
-            
+
             // Get all product categories
             $categories = get_terms(array(
                 'taxonomy' => 'product_cat',
@@ -80,24 +80,97 @@ class WooOrderCategoryFilter {
                 'orderby' => 'name',
                 'order' => 'ASC',
             ));
-            
+
             if (!empty($categories) && !is_wp_error($categories)) {
-                $selected_category = isset($_GET['product_category_filter']) ? sanitize_text_field($_GET['product_category_filter']) : '';
-                
-                echo '<select name="product_category_filter" id="product_category_filter">';
-                echo '<option value="">' . __('All Product Categories', 'woo-order-category-filter') . '</option>';
-                
-                foreach ($categories as $category) {
-                    printf(
-                        '<option value="%s"%s>%s (%d)</option>',
-                        esc_attr($category->slug),
-                        selected($selected_category, $category->slug, false),
-                        esc_html($category->name),
-                        $category->count
-                    );
-                }
-                
-                echo '</select>';
+                // Get selected categories (now supporting multiple)
+                $selected_categories = isset($_GET['product_category_filter']) && is_array($_GET['product_category_filter'])
+                    ? array_map('sanitize_text_field', $_GET['product_category_filter'])
+                    : array();
+
+                // Create a multi-select dropdown with custom styling
+                ?>
+                <div class="woo-category-filter-wrapper" style="display: inline-block; position: relative; vertical-align: middle;">
+                    <button type="button" class="woo-category-filter-btn button" id="woo-category-filter-btn" style="height: 32px; line-height: 30px; padding: 0 24px 0 12px; position: relative;">
+                        <span id="woo-category-filter-label">
+                            <?php
+                            if (empty($selected_categories)) {
+                                _e('Filter by Category', 'woo-order-category-filter');
+                            } else {
+                                printf(_n('%d Category', '%d Categories', count($selected_categories), 'woo-order-category-filter'), count($selected_categories));
+                            }
+                            ?>
+                        </span>
+                        <span style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%);">▼</span>
+                    </button>
+                    <div class="woo-category-filter-dropdown" id="woo-category-filter-dropdown" style="display: none; position: absolute; top: 100%; left: 0; margin-top: 4px; background: #fff; border: 1px solid #8c8f94; border-radius: 3px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); z-index: 10000; min-width: 250px; max-height: 300px; overflow-y: auto;">
+                        <div style="padding: 10px; border-bottom: 1px solid #ddd; background: #f6f7f7;">
+                            <label style="margin: 0; font-weight: 600; cursor: pointer; display: block;">
+                                <input type="checkbox" id="woo-select-all-cats" style="margin-right: 5px; vertical-align: middle;">
+                                <?php _e('Select All', 'woo-order-category-filter'); ?>
+                            </label>
+                        </div>
+                        <div style="padding: 5px 10px;">
+                            <?php foreach ($categories as $category) : ?>
+                                <label style="display: block; padding: 5px 0; margin: 0; cursor: pointer;">
+                                    <input
+                                        type="checkbox"
+                                        name="product_category_filter[]"
+                                        class="woo-cat-checkbox"
+                                        value="<?php echo esc_attr($category->slug); ?>"
+                                        <?php checked(in_array($category->slug, $selected_categories)); ?>
+                                        style="margin-right: 5px; vertical-align: middle;"
+                                    >
+                                    <?php echo esc_html($category->name); ?> <span style="color: #666;">(<?php echo $category->count; ?>)</span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                </div>
+                <script>
+                jQuery(document).ready(function($) {
+                    // Toggle dropdown
+                    $('#woo-category-filter-btn').on('click', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        $('#woo-category-filter-dropdown').toggle();
+                    });
+
+                    // Close dropdown when clicking outside
+                    $(document).on('click', function(e) {
+                        if (!$(e.target).closest('.woo-category-filter-wrapper').length) {
+                            $('#woo-category-filter-dropdown').hide();
+                        }
+                    });
+
+                    // Select/deselect all
+                    $('#woo-select-all-cats').on('change', function() {
+                        $('.woo-cat-checkbox').prop('checked', $(this).prop('checked'));
+                        updateCategoryLabel();
+                    });
+
+                    // Update "Select All" when individual checkboxes change
+                    $('.woo-cat-checkbox').on('change', function() {
+                        var allChecked = $('.woo-cat-checkbox:checked').length === $('.woo-cat-checkbox').length;
+                        $('#woo-select-all-cats').prop('checked', allChecked);
+                        updateCategoryLabel();
+                    });
+
+                    // Update label text
+                    function updateCategoryLabel() {
+                        var count = $('.woo-cat-checkbox:checked').length;
+                        if (count === 0) {
+                            $('#woo-category-filter-label').text('<?php _e('Filter by Category', 'woo-order-category-filter'); ?>');
+                        } else {
+                            $('#woo-category-filter-label').text(count + ' <?php echo (count($categories) > 1) ? 'Categories' : 'Category'; ?>');
+                        }
+                    }
+
+                    // Initialize "Select All" state
+                    var allChecked = $('.woo-cat-checkbox:checked').length === $('.woo-cat-checkbox').length && $('.woo-cat-checkbox').length > 0;
+                    $('#woo-select-all-cats').prop('checked', allChecked);
+                });
+                </script>
+                <?php
             }
         }
     }
@@ -146,6 +219,21 @@ class WooOrderCategoryFilter {
                         border-color: #2271b1;
                         color: #2271b1;
                     }
+                    /* Fix checkbox styling */
+                    .woo-category-filter-dropdown input[type="checkbox"] {
+                        width: 16px;
+                        height: 16px;
+                        min-width: 16px;
+                        min-height: 16px;
+                        margin: 0 5px 0 0;
+                        padding: 0;
+                        vertical-align: middle;
+                        border-radius: 2px;
+                    }
+                    .woo-category-filter-dropdown label {
+                        cursor: pointer;
+                        user-select: none;
+                    }
                 </style>
                 <?php
                 $styles_added = true;
@@ -187,7 +275,7 @@ class WooOrderCategoryFilter {
     }
 
     /**
-     * Filter orders based on selected category
+     * Filter orders based on selected category (now supports multiple)
      */
     public function filter_orders_by_category($vars) {
         global $typenow;
@@ -197,10 +285,13 @@ class WooOrderCategoryFilter {
             && isset($_GET['product_category_filter'])
             && !empty($_GET['product_category_filter'])) {
 
-            $category_slug = sanitize_text_field($_GET['product_category_filter']);
+            // Handle both single and multiple category selection
+            $category_slugs = is_array($_GET['product_category_filter'])
+                ? array_map('sanitize_text_field', $_GET['product_category_filter'])
+                : array(sanitize_text_field($_GET['product_category_filter']));
 
-            // Get all orders that contain products from the selected category
-            $order_ids = $this->get_orders_by_category($category_slug);
+            // Get all orders that contain products from ANY of the selected categories
+            $order_ids = $this->get_orders_by_categories($category_slugs);
 
             if (!empty($order_ids)) {
                 $vars['post__in'] = $order_ids;
@@ -214,19 +305,34 @@ class WooOrderCategoryFilter {
     }
 
     /**
-     * Get order IDs that contain products from a specific category
+     * Get order IDs that contain products from multiple categories
      */
-    private function get_orders_by_category($category_slug) {
+    private function get_orders_by_categories($category_slugs) {
         global $wpdb;
 
-        // Get the category term
-        $category = get_term_by('slug', $category_slug, 'product_cat');
+        // Ensure we have an array
+        if (!is_array($category_slugs)) {
+            $category_slugs = array($category_slugs);
+        }
 
-        if (!$category) {
+        if (empty($category_slugs)) {
             return array();
         }
 
-        // Get all product IDs in this category (including child categories)
+        // Get all category term IDs
+        $category_term_ids = array();
+        foreach ($category_slugs as $slug) {
+            $category = get_term_by('slug', $slug, 'product_cat');
+            if ($category && !is_wp_error($category)) {
+                $category_term_ids[] = $category->term_id;
+            }
+        }
+
+        if (empty($category_term_ids)) {
+            return array();
+        }
+
+        // Get all product IDs in these categories (including child categories)
         $product_ids = get_posts(array(
             'post_type' => 'product',
             'numberposts' => -1,
@@ -236,7 +342,8 @@ class WooOrderCategoryFilter {
                 array(
                     'taxonomy' => 'product_cat',
                     'field' => 'term_id',
-                    'terms' => $category->term_id,
+                    'terms' => $category_term_ids,
+                    'operator' => 'IN', // Match ANY of the selected categories
                     'include_children' => true,
                 ),
             ),
