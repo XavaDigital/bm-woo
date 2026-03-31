@@ -34,7 +34,10 @@ class WooOrderCategoryFilter {
         
         // Add filter dropdown to orders page
         add_action('restrict_manage_posts', array($this, 'add_category_filter_dropdown'), 20);
-        
+
+        // Add status filter dropdown
+        add_action('restrict_manage_posts', array($this, 'add_status_filter_dropdown'), 20);
+
         // Add custom date range filter
         add_action('restrict_manage_posts', array($this, 'add_date_range_filter'), 20);
         
@@ -262,9 +265,9 @@ class WooOrderCategoryFilter {
             <?php
 
             // Show clear filters button if any filter is active
-            $has_filters = !empty($_GET['product_category_filter']) || !empty($start_date) || !empty($end_date);
+            $has_filters = !empty($_GET['product_category_filter']) || !empty($start_date) || !empty($end_date) || !empty($_GET['woo_status_filter']);
             if ($has_filters) {
-                $clear_url = remove_query_arg(array('product_category_filter', 'order_date_start', 'order_date_end'));
+                $clear_url = remove_query_arg(array('product_category_filter', 'order_date_start', 'order_date_end', 'woo_status_filter'));
                 ?>
                 <a href="<?php echo esc_url($clear_url); ?>" class="button woo-clear-filters-btn">
                     <?php _e('Clear Filters', 'woo-order-category-filter'); ?>
@@ -275,16 +278,44 @@ class WooOrderCategoryFilter {
     }
 
     /**
-     * Filter orders based on selected category (now supports multiple)
+     * Add status filter dropdown
+     */
+    public function add_status_filter_dropdown() {
+        global $typenow;
+
+        if ('shop_order' === $typenow) {
+            $selected = isset($_GET['woo_status_filter']) ? sanitize_text_field($_GET['woo_status_filter']) : '';
+
+            ?>
+            <select name="woo_status_filter" id="woo_status_filter" style="float: none;">
+                <option value=""><?php _e('All Status Groups', 'woo-order-category-filter'); ?></option>
+                <option value="ready_to_ship" <?php selected($selected, 'ready_to_ship'); ?>>
+                    <?php _e('📦 Ready to Ship', 'woo-order-category-filter'); ?>
+                </option>
+                <option value="needs_attention" <?php selected($selected, 'needs_attention'); ?>>
+                    <?php _e('⚠️ Needs Attention', 'woo-order-category-filter'); ?>
+                </option>
+                <option value="problem_orders" <?php selected($selected, 'problem_orders'); ?>>
+                    <?php _e('❌ Problem Orders', 'woo-order-category-filter'); ?>
+                </option>
+            </select>
+            <?php
+        }
+    }
+
+    /**
+     * Filter orders based on selected category (now supports multiple) and status
      */
     public function filter_orders_by_category($vars) {
         global $typenow;
 
         // Only filter on shop_order post type
-        if (('shop_order' === $typenow || (isset($vars['post_type']) && 'shop_order' === $vars['post_type']))
-            && isset($_GET['product_category_filter'])
-            && !empty($_GET['product_category_filter'])) {
+        if ('shop_order' !== $typenow && (!isset($vars['post_type']) || 'shop_order' !== $vars['post_type'])) {
+            return $vars;
+        }
 
+        // Apply category filter
+        if (isset($_GET['product_category_filter']) && !empty($_GET['product_category_filter'])) {
             // Handle both single and multiple category selection
             $category_slugs = is_array($_GET['product_category_filter'])
                 ? array_map('sanitize_text_field', $_GET['product_category_filter'])
@@ -298,6 +329,25 @@ class WooOrderCategoryFilter {
             } else {
                 // No orders found, return empty result
                 $vars['post__in'] = array(0);
+            }
+        }
+
+        // Apply status filter
+        if (isset($_GET['woo_status_filter']) && !empty($_GET['woo_status_filter'])) {
+            $status_filter = sanitize_text_field($_GET['woo_status_filter']);
+
+            switch ($status_filter) {
+                case 'ready_to_ship':
+                    $vars['post_status'] = 'wc-processing';
+                    break;
+
+                case 'needs_attention':
+                    $vars['post_status'] = array('wc-on-hold', 'wc-pending');
+                    break;
+
+                case 'problem_orders':
+                    $vars['post_status'] = array('wc-cancelled', 'wc-refunded', 'wc-failed');
+                    break;
             }
         }
 
