@@ -75,6 +75,12 @@ class WooBoosterRefundFilter {
      * This runs before Booster processes the bulk action
      */
     public function intercept_bulk_action() {
+        // Only run on the orders page
+        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+        if ($screen && !in_array($screen->id, array('edit-shop_order', 'woocommerce_page_wc-orders'))) {
+            return;
+        }
+
         // Check if this is a bulk action request
         if (!isset($_REQUEST['action']) && !isset($_REQUEST['action2'])) {
             return;
@@ -94,6 +100,22 @@ class WooBoosterRefundFilter {
 
         // Check if orders are selected
         if (!isset($_REQUEST['post']) || !is_array($_REQUEST['post'])) {
+            return;
+        }
+
+        // Don't interfere with WooCommerce native actions
+        $wc_native_actions = array(
+            'mark_processing',
+            'mark_on-hold',
+            'mark_completed',
+            'mark_cancelled',
+            'trash',
+            'untrash',
+            'delete',
+            'remove_personal_data'
+        );
+
+        if (in_array($action, $wc_native_actions)) {
             return;
         }
 

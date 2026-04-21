@@ -309,6 +309,16 @@ class WooOrderCategoryFilter {
     public function filter_orders_by_category($vars) {
         global $typenow;
 
+        // Don't run on AJAX requests
+        if (wp_doing_ajax()) {
+            return $vars;
+        }
+
+        // Don't run in admin unless we're on the orders list page
+        if (is_admin() && !isset($_GET['product_category_filter']) && !isset($_GET['woo_status_filter'])) {
+            return $vars;
+        }
+
         // Only filter on shop_order post type
         if ('shop_order' !== $typenow && (!isset($vars['post_type']) || 'shop_order' !== $vars['post_type'])) {
             return $vars;

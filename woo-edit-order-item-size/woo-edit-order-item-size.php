@@ -47,6 +47,9 @@ class WooEditOrderItemSize {
         // Handle AJAX load product variations
         add_action('wp_ajax_load_product_variations', array($this, 'ajax_load_product_variations'));
 
+        // Handle AJAX get edit form
+        add_action('wp_ajax_get_edit_form', array($this, 'ajax_get_edit_form'));
+
         // Enqueue admin scripts
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_scripts'));
 
@@ -202,13 +205,73 @@ class WooEditOrderItemSize {
             error_log("Using variation product attributes: " . print_r($current_variation_attributes, true));
         }
 
-        ?>
-        <tr class="edit-variation-row" id="edit-variation-<?php echo esc_attr($item_id); ?>" style="display: none;">
-            <td colspan="6" style="padding: 15px; background-color: #f9f9f9; border-left: 3px solid #2271b1;">
-                <div class="edit-variation-container" data-item-id="<?php echo esc_attr($item_id); ?>">
-                    <h4 style="margin-top: 0;"><?php _e('Edit Product', 'woo-edit-order-item-size'); ?></h4>
+        // Instead of rendering inline (which breaks WooCommerce modals),
+        // we'll render in a modal popup that's created on demand
+        // Just return here - the JavaScript will handle creating the modal
+        return;
+    }
 
-                    <!-- Product Selector -->
+    /**
+     * AJAX handler to get edit form HTML for a specific item
+     */
+    public function ajax_get_edit_form() {
+        check_ajax_referer('woo_edit_item_size_nonce', 'nonce');
+
+        if (!current_user_can('edit_shop_orders')) {
+            wp_send_json_error(array('message' => 'Permission denied'));
+        }
+
+        $item_id = isset($_POST['item_id']) ? intval($_POST['item_id']) : 0;
+
+        if (!$item_id) {
+            wp_send_json_error(array('message' => 'Invalid item ID'));
+        }
+
+        // Get order item
+        $item = new WC_Order_Item_Product($item_id);
+        $product = $item->get_product();
+
+        if (!$product) {
+            wp_send_json_error(array('message' => 'Product not found'));
+        }
+
+        // Get parent product
+        $parent_id = $product->get_parent_id();
+        if (!$parent_id) {
+            $parent_id = $product->get_id();
+        }
+        $parent_product = wc_get_product($parent_id);
+
+        // Get all meta for this item
+        global $wpdb;
+        $all_meta = array();
+        $meta_data = $wpdb->get_results($wpdb->prepare(
+            "SELECT meta_key, meta_value FROM {$wpdb->prefix}woocommerce_order_itemmeta WHERE order_item_id = %d",
+            $item_id
+        ));
+
+        foreach ($meta_data as $meta) {
+            $all_meta[$meta->meta_key] = maybe_unserialize($meta->meta_value);
+        }
+
+        // Get current variation attributes
+        $current_variation_attributes = array();
+        foreach ($all_meta as $key => $value) {
+            if (strpos($key, 'pa_') === 0 || strpos($key, 'attribute_') === 0) {
+                $current_variation_attributes[$key] = $value;
+            }
+        }
+
+        // Get EPO data
+        $epo_data = isset($all_meta['_tmcartepo_data']) ? $all_meta['_tmcartepo_data'] : array();
+
+        // Get variation attributes
+        $attributes = $parent_product->get_variation_attributes();
+
+        // Start output buffering to capture the HTML
+        ob_start();
+        ?>
+        <!-- Product Selector -->
                     <div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: 2px solid #ddd;">
                         <label style="display: block; font-weight: 600; margin-bottom: 5px;">
                             <?php _e('Product:', 'woo-edit-order-item-size'); ?>
@@ -378,9 +441,9 @@ class WooEditOrderItemSize {
                         </span>
                     </div>
                 </div>
-            </td>
-        </tr>
         <?php
+        $html = ob_get_clean();
+        wp_send_json_success(array('html' => $html, 'item_id' => $item_id));
     }
 
     /**
@@ -1372,15 +1435,31 @@ class WooEditOrderItemSize {
      * Enqueue admin scripts and styles
      */
     public function enqueue_admin_scripts($hook) {
-        // Only load on order edit pages
-        if ('post.php' !== $hook && 'woocommerce_page_wc-orders' !== $hook) {
+        // Only load on order edit pages - be very specific
+        $valid_hooks = array('post.php', 'woocommerce_page_wc-orders');
+
+        if (!in_array($hook, $valid_hooks)) {
             return;
         }
 
         global $post;
+        $is_order_screen = false;
 
-        // Check if we're editing an order
-        if (isset($post) && 'shop_order' !== $post->post_type && !isset($_GET['id'])) {
+        // Check if we're editing an order (classic orders)
+        if (isset($post) && isset($post->post_type) && 'shop_order' === $post->post_type) {
+            $is_order_screen = true;
+        }
+        // Check if we're editing an order (HPOS)
+        elseif (isset($_GET['id']) && isset($_GET['action']) && $_GET['action'] === 'edit') {
+            // Verify this is actually an order
+            $order = wc_get_order(intval($_GET['id']));
+            if ($order) {
+                $is_order_screen = true;
+            }
+        }
+
+        // Don't load scripts unless we're definitely on an order edit screen
+        if (!$is_order_screen) {
             return;
         }
 
@@ -1398,29 +1477,39 @@ class WooEditOrderItemSize {
         // Add inline script
         $script = "
         jQuery(document).ready(function(\$) {
-            // Initialize Select2 for product search
-            \$('.product-selector').select2({
-                ajax: {
-                    url: ajaxurl,
-                    dataType: 'json',
-                    delay: 250,
-                    data: function(params) {
-                        return {
-                            action: 'search_products',
-                            nonce: '" . esc_js($nonce) . "',
-                            term: params.term
-                        };
+            // Function to initialize Select2 for a specific element
+            function initializeSelect2(element) {
+                if (\$(element).hasClass('select2-hidden-accessible')) {
+                    \$(element).select2('destroy');
+                }
+
+                \$(element).select2({
+                    ajax: {
+                        url: ajaxurl,
+                        dataType: 'json',
+                        delay: 250,
+                        data: function(params) {
+                            return {
+                                action: 'search_products',
+                                nonce: '" . esc_js($nonce) . "',
+                                term: params.term
+                            };
+                        },
+                        processResults: function(data) {
+                            return {
+                                results: data
+                            };
+                        },
+                        cache: true
                     },
-                    processResults: function(data) {
-                        return {
-                            results: data
-                        };
-                    },
-                    cache: true
-                },
-                minimumInputLength: 2,
-                placeholder: 'Search for a product...'
-            });
+                    minimumInputLength: 2,
+                    placeholder: 'Search for a product...',
+                    dropdownParent: \$(element).closest('.edit-variation-container')
+                });
+            }
+
+            // Don't initialize Select2 on page load - wait until edit form is opened
+            // This prevents conflicts with WooCommerce modals
 
             // Handle product selection
             \$(document).on('change', '.product-selector', function() {
@@ -1476,11 +1565,81 @@ class WooEditOrderItemSize {
                 });
             });
 
-            // Toggle edit form
+            // Open edit form in modal
             \$(document).on('click', '.edit-item-variation', function(e) {
                 e.preventDefault();
                 var itemId = \$(this).data('item-id');
-                \$('#edit-variation-' + itemId).toggle();
+
+                // Check if modal already exists
+                if (\$('#edit-item-modal-' + itemId).length > 0) {
+                    \$('#edit-item-modal-' + itemId).show();
+                    return;
+                }
+
+                // Show loading indicator
+                \$('body').append('<div id=\"edit-item-loading\" style=\"position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 159999; display: flex; align-items: center; justify-content: center;\"><div style=\"background: white; padding: 30px; border-radius: 5px; text-align: center;\"><div class=\"spinner is-active\" style=\"float: none; margin: 0 auto 10px;\"></div><p>Loading edit form...</p></div></div>');
+
+                // Load form via AJAX
+                \$.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'get_edit_form',
+                        item_id: itemId,
+                        nonce: '" . wp_create_nonce('woo_edit_item_size_nonce') . "'
+                    },
+                    success: function(response) {
+                        \$('#edit-item-loading').remove();
+
+                        if (response.success) {
+                            // Create modal with form HTML
+                            var modal = '<div id=\"edit-item-modal-' + itemId + '\" style=\"position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 159999; display: flex; align-items: center; justify-content: center; overflow-y: auto;\">' +
+                                '<div style=\"background: white; padding: 30px; border-radius: 5px; max-width: 800px; width: 90%; max-height: 90vh; overflow-y: auto; position: relative; margin: 20px;\">' +
+                                    '<button class=\"close-edit-modal\" data-item-id=\"' + itemId + '\" style=\"position: absolute; top: 15px; right: 15px; background: none; border: none; font-size: 24px; cursor: pointer; color: #666;\" title=\"Close\">&times;</button>' +
+                                    '<h2 style=\"margin-top: 0; padding-right: 30px;\">Edit Product</h2>' +
+                                    '<div class=\"edit-variation-container\" data-item-id=\"' + itemId + '\">' +
+                                        response.data.html +
+                                    '</div>' +
+                                '</div>' +
+                            '</div>';
+
+                            \$('body').append(modal);
+
+                            // Initialize Select2 for the newly added form
+                            \$('#edit-item-modal-' + itemId + ' .product-selector').each(function() {
+                                initializeSelect2(this);
+                            });
+                        } else {
+                            alert('Error loading edit form: ' + response.data.message);
+                        }
+                    },
+                    error: function() {
+                        \$('#edit-item-loading').remove();
+                        alert('Error loading edit form');
+                    }
+                });
+            });
+
+            // Close modal
+            \$(document).on('click', '.close-edit-modal', function() {
+                var itemId = \$(this).data('item-id');
+                var modal = \$('#edit-item-modal-' + itemId);
+
+                // Destroy Select2
+                modal.find('.product-selector').each(function() {
+                    if (\$(this).hasClass('select2-hidden-accessible')) {
+                        \$(this).select2('destroy');
+                    }
+                });
+
+                modal.remove();
+            });
+
+            // Close modal when clicking outside
+            \$(document).on('click', '[id^=\"edit-item-modal-\"]', function(e) {
+                if (e.target === this) {
+                    \$(this).find('.close-edit-modal').click();
+                }
             });
 
             // Cancel edit
@@ -1496,7 +1655,11 @@ class WooEditOrderItemSize {
 
                 var button = \$(this);
                 var itemId = button.data('item-id');
-                var container = \$('#edit-variation-' + itemId);
+                // Find container - could be in modal or inline (fallback)
+                var container = button.closest('.edit-variation-container');
+                if (container.length === 0) {
+                    container = \$('#edit-variation-' + itemId);
+                }
                 var spinner = container.find('.spinner');
                 var message = container.find('.save-message');
 
@@ -1573,6 +1736,18 @@ class WooEditOrderItemSize {
                         alert('" . esc_js($error_message) . "');
                     }
                 });
+            });
+
+            // Cancel button - close modal
+            \$(document).on('click', '.cancel-variation-edit', function() {
+                var itemId = \$(this).data('item-id');
+                var modal = \$('#edit-item-modal-' + itemId);
+                if (modal.length > 0) {
+                    modal.find('.close-edit-modal').click();
+                } else {
+                    // Fallback for inline forms
+                    \$('#edit-variation-' + itemId).hide();
+                }
             });
         });
         ";

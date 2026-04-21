@@ -108,6 +108,9 @@ class WooEPOEditor {
         $order_id = $order->get_id();
         $has_epo_data = false;
 
+        // Ensure scripts are only enqueued when this meta box is actually rendered
+        static $scripts_enqueued = false;
+
         ?>
         <div class="woo-epo-editor-wrapper">
             <?php
@@ -196,52 +199,7 @@ class WooEPOEditor {
             }
             ?>
 
-            <!-- Add Field Modal (hidden by default) -->
-            <div id="epo-add-field-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 100000; align-items: center; justify-content: center;">
-                <div style="background: white; padding: 30px; border-radius: 5px; max-width: 500px; width: 90%; box-shadow: 0 5px 15px rgba(0,0,0,0.3);">
-                    <h3 style="margin-top: 0;"><?php _e('Add Extra Product Option Field', 'woo-epo-editor'); ?></h3>
 
-                    <p style="color: #666;">
-                        <?php _e('Add a custom field to this product in the order:', 'woo-epo-editor'); ?>
-                        <strong id="epo-modal-product-name"></strong>
-                    </p>
-
-                    <div style="margin-bottom: 15px;">
-                        <label for="epo-field-name-select" style="display: block; font-weight: bold; margin-bottom: 5px;">
-                            <?php _e('Field Name:', 'woo-epo-editor'); ?>
-                        </label>
-                        <select id="epo-field-name-select" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px; margin-bottom: 10px;">
-                            <option value=""><?php _e('Loading product fields...', 'woo-epo-editor'); ?></option>
-                        </select>
-                        <div id="epo-custom-field-name-wrapper" style="display: none;">
-                            <input type="text" id="epo-new-field-name" placeholder="<?php _e('e.g., Custom Name, Size, Color', 'woo-epo-editor'); ?>" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;" />
-                        </div>
-                        <small style="color: #666; display: block; margin-top: 5px;">
-                            <?php _e('Select an existing field name from the product, or choose "Custom" to enter your own', 'woo-epo-editor'); ?>
-                        </small>
-                    </div>
-
-                    <div style="margin-bottom: 20px;">
-                        <label for="epo-new-field-value" style="display: block; font-weight: bold; margin-bottom: 5px;">
-                            <?php _e('Field Value:', 'woo-epo-editor'); ?>
-                        </label>
-                        <input type="text" id="epo-new-field-value" placeholder="<?php _e('e.g., John Smith, Large, Blue', 'woo-epo-editor'); ?>" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;" />
-                        <small style="color: #666;"><?php _e('What is the value for this field?', 'woo-epo-editor'); ?></small>
-                    </div>
-
-                    <div style="text-align: right;">
-                        <button type="button" class="button" id="epo-cancel-add-field">
-                            <?php _e('Cancel', 'woo-epo-editor'); ?>
-                        </button>
-                        <button type="button" class="button button-primary" id="epo-confirm-add-field">
-                            ➕ <?php _e('Add Field', 'woo-epo-editor'); ?>
-                        </button>
-                    </div>
-
-                    <input type="hidden" id="epo-modal-item-id" value="" />
-                    <input type="hidden" id="epo-modal-product-id" value="" />
-                </div>
-            </div>
         </div>
         <?php
     }
@@ -250,21 +208,34 @@ class WooEPOEditor {
      * Enqueue admin scripts
      */
     public function enqueue_admin_scripts($hook) {
-        // Only load on order edit screen
-        if ('post.php' !== $hook && 'woocommerce_page_wc-orders' !== $hook) {
+        // Only load on order edit screen - be very specific
+        $valid_hooks = array('post.php', 'woocommerce_page_wc-orders');
+
+        if (!in_array($hook, $valid_hooks)) {
             return;
         }
 
         global $post;
         $order_id = null;
+        $is_order_screen = false;
 
-        if ($post && $post->post_type === 'shop_order') {
+        // For classic orders
+        if ($post && isset($post->post_type) && $post->post_type === 'shop_order') {
             $order_id = $post->ID;
-        } elseif (isset($_GET['id'])) {
+            $is_order_screen = true;
+        }
+        // For HPOS orders
+        elseif (isset($_GET['id']) && isset($_GET['action']) && $_GET['action'] === 'edit') {
             $order_id = intval($_GET['id']);
+            // Verify this is actually an order
+            $order = wc_get_order($order_id);
+            if ($order) {
+                $is_order_screen = true;
+            }
         }
 
-        if (!$order_id) {
+        // Only proceed if we're definitely on an order edit screen
+        if (!$order_id || !$is_order_screen) {
             return;
         }
 
@@ -284,9 +255,53 @@ class WooEPOEditor {
                 console.log('EPO Editor: ajaxurl is: ' + ajaxurl);
             }
 
+            // Check if EPO meta box exists - only proceed if it does
+            if ($('.woo-epo-editor-wrapper').length === 0) {
+                console.log('EPO Editor: Meta box not found, skipping initialization');
+                return;
+            }
+
             // Check if save buttons exist
             var saveButtons = $('.epo-save-field');
             console.log('EPO Editor: Found ' + saveButtons.length + ' save buttons');
+
+            // Create modal HTML dynamically to avoid conflicts
+            function createModal() {
+                if ($('#epo-add-field-modal').length > 0) {
+                    return; // Modal already exists
+                }
+
+                var modalHTML = '<div id=\"epo-add-field-modal\" style=\"display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 99999; align-items: center; justify-content: center;\">' +
+                    '<div style=\"background: white; padding: 30px; border-radius: 5px; max-width: 500px; width: 90%; box-shadow: 0 5px 15px rgba(0,0,0,0.3); position: relative; z-index: 100000;\">' +
+                        '<h3 style=\"margin-top: 0;\">" . esc_js(__('Add Extra Product Option Field', 'woo-epo-editor')) . "</h3>' +
+                        '<p style=\"color: #666;\">" . esc_js(__('Add a custom field to this product in the order:', 'woo-epo-editor')) . " <strong id=\"epo-modal-product-name\"></strong></p>' +
+                        '<div style=\"margin-bottom: 15px;\">' +
+                            '<label for=\"epo-field-name-select\" style=\"display: block; font-weight: bold; margin-bottom: 5px;\">" . esc_js(__('Field Name:', 'woo-epo-editor')) . "</label>' +
+                            '<select id=\"epo-field-name-select\" style=\"width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px; margin-bottom: 10px;\">' +
+                                '<option value=\"\">" . esc_js(__('Loading product fields...', 'woo-epo-editor')) . "</option>' +
+                            '</select>' +
+                            '<div id=\"epo-custom-field-name-wrapper\" style=\"display: none;\">' +
+                                '<input type=\"text\" id=\"epo-new-field-name\" placeholder=\"" . esc_js(__('e.g., Custom Name, Size, Color', 'woo-epo-editor')) . "\" style=\"width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;\" />' +
+                            '</div>' +
+                            '<small style=\"color: #666; display: block; margin-top: 5px;\">" . esc_js(__('Select an existing field name from the product, or choose "Custom" to enter your own', 'woo-epo-editor')) . "</small>' +
+                        '</div>' +
+                        '<div style=\"margin-bottom: 20px;\">' +
+                            '<label for=\"epo-new-field-value\" style=\"display: block; font-weight: bold; margin-bottom: 5px;\">" . esc_js(__('Field Value:', 'woo-epo-editor')) . "</label>' +
+                            '<input type=\"text\" id=\"epo-new-field-value\" placeholder=\"" . esc_js(__('e.g., John Smith, Large, Blue', 'woo-epo-editor')) . "\" style=\"width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;\" />' +
+                            '<small style=\"color: #666;\">" . esc_js(__('What is the value for this field?', 'woo-epo-editor')) . "</small>' +
+                        '</div>' +
+                        '<div style=\"text-align: right;\">' +
+                            '<button type=\"button\" class=\"button\" id=\"epo-cancel-add-field\">" . esc_js(__('Cancel', 'woo-epo-editor')) . "</button> ' +
+                            '<button type=\"button\" class=\"button button-primary\" id=\"epo-confirm-add-field\">➕ " . esc_js(__('Add Field', 'woo-epo-editor')) . "</button>' +
+                        '</div>' +
+                        '<input type=\"hidden\" id=\"epo-modal-item-id\" value=\"\" />' +
+                        '<input type=\"hidden\" id=\"epo-modal-product-id\" value=\"\" />' +
+                    '</div>' +
+                '</div>';
+
+                $('body').append(modalHTML);
+                console.log('EPO Editor: Modal created dynamically');
+            }
 
             // Handle save button click
             $('.epo-save-field').on('click', function(e) {
@@ -380,6 +395,10 @@ class WooEPOEditor {
             // Handle Add Field button click
             $('.epo-add-field-btn').on('click', function() {
                 console.log('EPO Editor: Add Field button clicked');
+
+                // Create modal if it doesn't exist
+                createModal();
+
                 var itemId = $(this).data('item-id');
                 var \$section = $(this).closest('.epo-item-section');
                 var productName = \$section.find('h4').text();
@@ -570,6 +589,36 @@ class WooEPOEditor {
             .epo-save-field:disabled {
                 opacity: 0.6;
                 cursor: not-allowed;
+            }
+            /* Modal styles - use lower z-index than WooCommerce modals */
+            .epo-modal-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                z-index: 99999 !important;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .epo-modal-content {
+                background: white;
+                padding: 30px;
+                border-radius: 5px;
+                max-width: 500px;
+                width: 90%;
+                box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+                position: relative;
+                z-index: 100000 !important;
+            }
+            /* Ensure WooCommerce refund modal stays on top */
+            .wc-backbone-modal {
+                z-index: 160000 !important;
+            }
+            .wc-backbone-modal-backdrop {
+                z-index: 159900 !important;
             }
         ");
     }
