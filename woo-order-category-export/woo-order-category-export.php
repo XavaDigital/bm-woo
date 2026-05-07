@@ -492,7 +492,7 @@ class WooOrderCategoryExport {
             $payment_method = $order->get_payment_method_title();
 
             // Add a row for each item in the order
-            foreach ($order->get_items() as $item) {
+            foreach ($order->get_items() as $item_id => $item) {
                 $product = $item->get_product();
                 if (!$product) continue;
 
@@ -506,7 +506,12 @@ class WooOrderCategoryExport {
 
                 $product_name = $item->get_name();
                 $product_sku = $product->get_sku();
-                $quantity = $item->get_quantity();
+
+                // Calculate actual quantity after refunds
+                // get_qty_refunded_for_item returns a negative number, so we add it
+                $refunded_qty = $order->get_qty_refunded_for_item($item_id);
+                $quantity = $item->get_quantity() + $refunded_qty; // Adding negative = subtracting
+
                 $product_total = $item->get_total();
 
                 // Get ALL custom fields (variation attributes, extra product options, etc.)
