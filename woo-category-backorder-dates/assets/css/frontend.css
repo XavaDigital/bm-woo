@@ -1,0 +1,151 @@
+/* WooCommerce Category Pre-Order & Back-Order Dates */
+
+.wcbd-message {
+    display: inline-block;
+    font-size: 0.9em;
+    line-height: 1.3;
+    color: #b35a00;
+}
+
+.wcbd-message--card {
+    margin: 0.25em 0;
+}
+
+.wcbd-message--product {
+    margin: 0.5em 0;
+    padding: 0.6em 0.8em;
+    background: #fff7ed;
+    border-left: 3px solid #d97706;
+    border-radius: 3px;
+    color: #92400e;
+}
+
+.wcbd-stock-message {
+    display: inline-block;
+    font-size: 0.9em;
+    line-height: 1.3;
+}
+
+.wcbd-stock-message--out {
+    color: #b91c1c;
+    font-weight: 600;
+}
+
+.wcbd-stock-message--in {
+    color: #15803d;
+}
+
+/* Checkout confirmation */
+.wcbd-checkout-notice {
+    margin: 1em 0;
+    padding: 1em 1.2em;
+    background: #fff7ed;
+    border: 1px solid #fcd9a8;
+    border-radius: 4px;
+}
+
+.wcbd-checkout-notice .wcbd-checkout-intro {
+    margin: 0 0 0.5em;
+    font-weight: 600;
+}
+
+.wcbd-backorder-list {
+    margin: 0 0 0.75em;
+    padding-left: 1.2em;
+}
+
+.wcbd-backorder-list li {
+    margin: 0.15em 0;
+}
+
+.wcbd-confirm-row {
+    margin: 0;
+}
+
+.wcbd-confirm-row label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5em;
+    cursor: pointer;
+}
+
+/* Place Order disabled while confirmation is unticked */
+#place_order.wcbd-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Full-screen blocking overlay on the checkout */
+.wcbd-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 999999;
+    background: rgba(0, 0, 0, 0.6);
+    align-items: center;
+    justify-content: center;
+    padding: 1em;
+}
+
+.wcbd-overlay.is-active {
+    display: flex;
+}
+
+.wcbd-overlay__dialog {
+    background: #fff;
+    width: 100%;
+    max-width: 520px;
+    max-height: 90vh;
+    overflow: auto;
+    border-radius: 6px;
+    padding: 1.6em;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+}
+
+.wcbd-overlay__title {
+    margin: 0 0 0.5em;
+    font-size: 1.3em;
+}
+
+.wcbd-overlay__intro {
+    margin: 0 0 0.75em;
+    font-weight: 600;
+}
+
+.wcbd-overlay__list {
+    margin: 0 0 1.2em;
+    padding-left: 1.2em;
+}
+
+.wcbd-overlay__list li {
+    margin: 0.2em 0;
+}
+
+.wcbd-overlay__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6em;
+}
+
+.wcbd-overlay__actions .wcbd-overlay__cancel {
+    background: transparent;
+    border: 1px solid currentColor;
+    opacity: 0.85;
+}
+
+body.wcbd-overlay-open {
+    overflow: hidden;
+}
+
+/* Hide Stripe express checkout (Apple Pay / Google Pay / Link) when back-order items
+   are present, forcing the normal checkout where the confirmation is required. */
+.wcbd-suppress-express #wc-stripe-payment-request-wrapper,
+.wcbd-suppress-express #wc-stripe-payment-request-button-separator,
+.wcbd-suppress-express #wc-stripe-express-checkout-element,
+.wcbd-suppress-express #wc-stripe-express-checkout-button-separator,
+.wcbd-suppress-express .wc-stripe-payment-request-wrapper,
+.wcbd-suppress-express .wc-stripe-express-checkout-wrapper,
+.wcbd-suppress-express .wc-block-components-express-payment,
+.wcbd-suppress-express .wc-block-components-express-payment-continue-rule {
+    display: none !important;
+}
