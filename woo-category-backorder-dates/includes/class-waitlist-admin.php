@@ -164,8 +164,9 @@ class WCBD_Waitlist_Admin {
 
     /**
      * Process bulk actions before rendering, then redirect to avoid resubmission.
+     * Public because it's invoked as a `load-{hook}` action callback.
      */
-    protected function handle_actions() {
+    public function handle_actions() {
         if (empty($_REQUEST['action']) && empty($_REQUEST['action2'])) {
             return;
         }
