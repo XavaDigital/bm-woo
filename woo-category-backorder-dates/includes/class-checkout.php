@@ -28,7 +28,7 @@ class WCBD_Checkout {
 
     public function __construct() {
         add_action('woocommerce_before_checkout_form', array($this, 'capture_items'), 5);
-        add_action('woocommerce_checkout_before_customer_details', array($this, 'render_checkbox'));
+        add_action('woocommerce_review_order_before_submit', array($this, 'render_checkbox'));
         add_action('wp_footer', array($this, 'render_panel'), 50);
         add_action('woocommerce_checkout_process', array($this, 'validate'));
     }
@@ -60,23 +60,40 @@ class WCBD_Checkout {
     }
 
     /**
-     * The real required checkbox, inside the form and outside the AJAX-refreshed review area.
+     * The real required checkbox, rendered just above the Place Order button.
+     *
+     * This region re-renders on checkout AJAX (shipping/coupon changes), so we preserve the
+     * checked state server-side by reading the posted form data — no JS needed. Items are
+     * recomputed here (capture_items doesn't run during the AJAX order-review refresh).
      */
     public function render_checkbox() {
-        if (empty($this->items)) {
+        if (empty(WCBD_Resolver::get_cart_backorders())) {
             return;
         }
-        $label = WCBD_Settings::get('checkout_checkbox_label');
+        $label   = WCBD_Settings::get('checkout_checkbox_label');
+        $checked = $this->is_confirm_posted() ? ' checked="checked"' : '';
         ?>
         <div class="wcbd-checkout-notice" id="wcbd-checkout-notice">
             <p class="form-row wcbd-confirm-row validate-required">
                 <label class="woocommerce-form__label woocommerce-form__label-for-checkbox checkbox">
-                    <input type="checkbox" class="woocommerce-form__input woocommerce-form__input-checkbox input-checkbox" name="wcbd_confirm" id="wcbd_confirm" value="1" />
+                    <input type="checkbox" class="woocommerce-form__input woocommerce-form__input-checkbox input-checkbox" name="wcbd_confirm" id="wcbd_confirm" value="1"<?php echo $checked; ?> />
                     <span><?php echo wp_kses_post($label); ?></span>
                 </label>
             </p>
         </div>
         <?php
+    }
+
+    /**
+     * Was the confirmation checkbox ticked in the current request? Handles both the normal
+     * POST and the serialized post_data sent during the update_order_review AJAX refresh.
+     */
+    protected function is_confirm_posted() {
+        if (isset($_POST['post_data'])) {
+            parse_str(wp_unslash($_POST['post_data']), $posted);
+            return !empty($posted['wcbd_confirm']);
+        }
+        return !empty($_POST['wcbd_confirm']);
     }
 
     /**

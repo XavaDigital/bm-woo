@@ -19,6 +19,26 @@ class WCBD_Stock {
         add_filter('woocommerce_variation_is_purchasable', array($this, 'is_purchasable'), 20, 2);
         add_filter('woocommerce_get_availability', array($this, 'availability'), 20, 2);
         add_filter('woocommerce_add_to_cart_validation', array($this, 'validate_add_to_cart'), 20, 3);
+        add_action('wp_head', array($this, 'hide_add_to_cart_css'), 99);
+    }
+
+    /**
+     * Hide the Elementor add-to-cart widget on an out-of-stock single product page.
+     * WooCommerce hides its own add-to-cart form, but Elementor's widget renders
+     * independently. Printed inline so it survives "remove unused CSS" optimisers.
+     */
+    public function hide_add_to_cart_css() {
+        if (is_admin() || !function_exists('is_product') || !is_product()) {
+            return;
+        }
+        $product = wc_get_product(get_queried_object_id());
+        if (!$product || $product->is_in_stock()) {
+            return;
+        }
+        echo '<style id="wcbd-hide-add-to-cart">'
+            . '.elementor-widget-woocommerce-product-add-to-cart,'
+            . '.elementor-widget-wc-add-to-cart{display:none !important;}'
+            . '</style>';
     }
 
     public function is_in_stock($status, $product = null) {

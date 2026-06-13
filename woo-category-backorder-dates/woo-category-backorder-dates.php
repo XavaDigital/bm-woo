@@ -57,6 +57,7 @@ function wcbd_bootstrap() {
     require_once WCBD_PATH . 'includes/class-stock.php';
     require_once WCBD_PATH . 'includes/class-cron.php';
     require_once WCBD_PATH . 'includes/class-express.php';
+    require_once WCBD_PATH . 'includes/class-waitlist.php';
 
     new WCBD_Settings();
     new WCBD_Term_Meta();
@@ -67,6 +68,12 @@ function wcbd_bootstrap() {
     new WCBD_Stock();
     new WCBD_Cron();
     new WCBD_Express();
+    new WCBD_Waitlist();
+
+    if (is_admin()) {
+        require_once WCBD_PATH . 'includes/class-waitlist-admin.php';
+        new WCBD_Waitlist_Admin();
+    }
 
     add_action('wp_enqueue_scripts', 'wcbd_enqueue_assets');
 }
@@ -90,6 +97,8 @@ register_activation_hook(__FILE__, function () {
     if (!wp_next_scheduled('wcbd_sync_stock')) {
         wp_schedule_event(time(), 'hourly', 'wcbd_sync_stock');
     }
+    require_once WCBD_PATH . 'includes/class-waitlist.php';
+    WCBD_Waitlist::install();
 });
 
 /**

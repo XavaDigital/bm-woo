@@ -111,6 +111,16 @@ If you use a different express-payment plugin, extend the selectors in `WCBD_Exp
 
 > **Note on `:has()`:** the pure-CSS dismiss uses the `:has()` selector (all current browsers, 2023+). Very old browsers fall back to `checkout.js`; if both are unavailable the panel simply can't be dismissed (fail-safe — no bypass).
 
+## Waitlist
+Lets customers sign up to be notified when an **out-of-stock** product (cutoff-closed *or* real inventory) returns.
+
+- **Front end:** the `[waitlist_form]` shortcode renders a Name + Email + consent form, shown **only when the product is out of stock** (nothing otherwise). Place it where the add-to-cart would be (e.g. an Elementor Shortcode/Text widget). It submits via a standard POST (no JS), with nonce + honeypot.
+- **On signup:** the entry is stored in the `{prefix}wcbd_waitlist` table (de-duped per product + email) and the store admin is emailed.
+- **Admin:** **WooCommerce → Waitlist** lists all signups, filterable by product. Select rows and use the **Notify** bulk action to email those customers a back-in-stock message and mark them notified; or **Delete**.
+- **Settings:** admin recipient, form text (heading/intro/consent/button/success), and the back-in-stock email subject/body (placeholders `{product}`, `{name}`, `{url}`) under **WooCommerce → Back-Order Dates → Waitlist**.
+
+Notifying customers is **manual** (you click Notify when the product is restocked). The table is created on activation.
+
 ## Order persistence
 The cart note is stored as visible order-item meta, so it appears in the cart, on the order-received page, in confirmation emails, and on the admin order screen.
 

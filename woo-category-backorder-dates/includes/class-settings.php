@@ -40,6 +40,16 @@ class WCBD_Settings {
             'overlay_cancel_url'      => '',
             // Misc
             'cart_note_label'         => 'Delivery',
+
+            // Waitlist
+            'waitlist_admin_email'    => '',
+            'waitlist_heading'        => 'Join the waitlist',
+            'waitlist_intro'          => 'This product is currently unavailable. Enter your details and we\'ll email you when it\'s back.',
+            'waitlist_consent_label'  => 'I agree to be contacted about this product\'s availability.',
+            'waitlist_button'         => 'Join waitlist',
+            'waitlist_success'        => 'Thanks! You\'re on the waitlist &mdash; we\'ll email you when this product is available again.',
+            'waitlist_notify_subject' => '{product} is available again',
+            'waitlist_notify_body'    => "Hi {name},\n\nGood news — {product} is available again.\n\nYou can order it here: {url}\n\nThanks!",
         );
     }
 
@@ -106,7 +116,20 @@ class WCBD_Settings {
             __('Labels', 'wc-backorder-dates') => array(
                 'cart_note_label' => __('Cart / order note label', 'wc-backorder-dates'),
             ),
+            __('Waitlist', 'wc-backorder-dates') => array(
+                'waitlist_admin_email'    => __('Admin notification email (blank = site admin)', 'wc-backorder-dates'),
+                'waitlist_heading'        => __('Form heading', 'wc-backorder-dates'),
+                'waitlist_intro'          => __('Form intro text', 'wc-backorder-dates'),
+                'waitlist_consent_label'  => __('Consent checkbox label', 'wc-backorder-dates'),
+                'waitlist_button'         => __('Submit button label', 'wc-backorder-dates'),
+                'waitlist_success'        => __('Success message', 'wc-backorder-dates'),
+                'waitlist_notify_subject' => __('Back-in-stock email subject', 'wc-backorder-dates'),
+                'waitlist_notify_body'    => __('Back-in-stock email body', 'wc-backorder-dates'),
+            ),
         );
+
+        // Fields rendered as a multi-line textarea instead of a single-line input.
+        $textareas = array('waitlist_notify_body');
         ?>
         <div class="wrap">
             <h1><?php esc_html_e('Back-Order Dates', 'wc-backorder-dates'); ?></h1>
@@ -132,11 +155,19 @@ class WCBD_Settings {
                                     <label for="wcbd_<?php echo esc_attr($key); ?>"><?php echo esc_html($label); ?></label>
                                 </th>
                                 <td>
-                                    <input type="text"
-                                           class="large-text"
-                                           id="wcbd_<?php echo esc_attr($key); ?>"
-                                           name="<?php echo esc_attr(self::OPTION); ?>[<?php echo esc_attr($key); ?>]"
-                                           value="<?php echo esc_attr(self::get($key)); ?>" />
+                                    <?php if (in_array($key, $textareas, true)) : ?>
+                                        <textarea
+                                            class="large-text"
+                                            rows="6"
+                                            id="wcbd_<?php echo esc_attr($key); ?>"
+                                            name="<?php echo esc_attr(self::OPTION); ?>[<?php echo esc_attr($key); ?>]"><?php echo esc_textarea(self::get($key)); ?></textarea>
+                                    <?php else : ?>
+                                        <input type="text"
+                                               class="large-text"
+                                               id="wcbd_<?php echo esc_attr($key); ?>"
+                                               name="<?php echo esc_attr(self::OPTION); ?>[<?php echo esc_attr($key); ?>]"
+                                               value="<?php echo esc_attr(self::get($key)); ?>" />
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
