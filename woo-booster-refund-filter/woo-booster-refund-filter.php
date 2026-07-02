@@ -21,7 +21,21 @@ if (!defined('ABSPATH')) {
 }
 
 class WooBoosterRefundFilter {
-    
+
+    /**
+     * Text used both as the visible marker and as an idempotency guard so we
+     * never annotate the same item name twice within one request.
+     */
+    const REFUND_MARKER = 'REFUNDED';
+
+    /**
+     * Whether the current request is generating a Booster packing slip, in
+     * which case per-item refunds should be flagged on the document.
+     *
+     * @var bool
+     */
+    private $generating_packing_slip = false;
+
     /**
      * Constructor
      */
@@ -39,6 +53,11 @@ class WooBoosterRefundFilter {
         // Hook earlier in the process to intercept Booster actions
         add_action('admin_init', array($this, 'intercept_bulk_action'), 1);
         add_action('load-edit.php', array($this, 'intercept_bulk_action'), 1);
+
+        // Also flag refunds on single-order packing slips (the "Create/View
+        // Packing Slip" button on the order screen), which does not go through
+        // the bulk-action hooks above. init covers both admin and served PDFs.
+        add_action('init', array($this, 'detect_packing_slip_request'), 1);
 
         // Add admin notice when orders are excluded
         add_action('admin_notices', array($this, 'show_excluded_orders_notice'));
@@ -149,6 +168,9 @@ class WooBoosterRefundFilter {
             return;
         }
 
+        // Flag per-item refunds on packing slips (but not on invoices/receipts).
+        $this->maybe_enable_refund_annotation($action);
+
         // Filter the order IDs
         $post_ids = array_map('intval', $_REQUEST['post']);
         $excluded_statuses = array('refunded', 'cancelled', 'failed');
@@ -237,6 +259,9 @@ class WooBoosterRefundFilter {
 
         error_log('WOO BOOSTER FILTER - Processing ' . count($post_ids) . ' orders');
 
+        // Flag per-item refunds on packing slips (but not on invoices/receipts).
+        $this->maybe_enable_refund_annotation($action);
+
         $excluded_statuses = array('refunded', 'cancelled', 'failed');
         $excluded_orders = array();
         $filtered_post_ids = array();
@@ -284,7 +309,151 @@ class WooBoosterRefundFilter {
 
         return $redirect_to;
     }
-    
+
+    /**
+     * Enable per-item refund flagging for the current packing-slip request.
+     *
+     * Partially refunded orders keep a shippable status (processing/completed)
+     * and therefore stay in the export, but Booster renders every original line
+     * item at full quantity with no indication that some pieces were refunded.
+     * When we detect a packing-slip action we hook the order items so each
+     * refunded line is clearly marked on the printed slip. We deliberately skip
+     * invoices/receipts/credit notes, where a "DO NOT PACK" note is misleading.
+     *
+     * @param string $action The bulk action being processed.
+     */
+    private function maybe_enable_refund_annotation($action) {
+        if ($this->generating_packing_slip) {
+            return;
+        }
+
+        $action = strtolower($action);
+
+        // Monetary documents should not carry packing instructions.
+        foreach (array('invoice', 'receipt', 'credit', 'proforma') as $keyword) {
+            if (strpos($action, $keyword) !== false) {
+                return;
+            }
+        }
+
+        $this->enable_refund_annotation();
+    }
+
+    /**
+     * Detect a single-order Booster packing-slip request (the "Create/View
+     * Packing Slip" button on the order edit screen) and arm the annotation.
+     *
+     * This path bypasses the bulk-action hooks, so we sniff the request for a
+     * packing-slip signal instead. We key off the word "packing" so we never
+     * fire on invoices, receipts or ordinary page loads. Runs on init at
+     * priority 1, before Booster serves/generates the document.
+     */
+    public function detect_packing_slip_request() {
+        if ($this->generating_packing_slip || empty($_REQUEST)) {
+            return;
+        }
+
+        // Flatten request keys and scalar values into one lowercase haystack.
+        $parts = array();
+        foreach ($_REQUEST as $key => $value) {
+            $parts[] = $key;
+            if (is_scalar($value)) {
+                $parts[] = $value;
+            }
+        }
+        $haystack = strtolower(implode(' ', $parts));
+
+        // Only act on packing-slip documents; invoices/receipts are excluded.
+        if (strpos($haystack, 'packing') === false) {
+            return;
+        }
+
+        $this->enable_refund_annotation();
+    }
+
+    /**
+     * Arm the per-item refund annotation for the current request.
+     *
+     * Uses a late filter priority so we annotate the final name/quantity after
+     * other plugins have had their say.
+     */
+    private function enable_refund_annotation() {
+        if ($this->generating_packing_slip) {
+            return;
+        }
+
+        $this->generating_packing_slip = true;
+
+        add_filter('woocommerce_order_get_items', array($this, 'annotate_refunded_items'), 999, 3);
+
+        error_log('WOO BOOSTER FILTER - Refund annotation enabled for packing slip');
+    }
+
+    /**
+     * Append a visible refund flag to each line item that has been (partially
+     * or fully) refunded, so warehouse staff never pack refunded garments.
+     *
+     * Only mutates the in-memory name used for rendering; the order is never
+     * saved during PDF generation, so nothing is persisted.
+     *
+     * @param array    $items The order line items, keyed by item ID.
+     * @param WC_Order $order The order the items belong to.
+     * @param array    $types The item types requested.
+     * @return array
+     */
+    public function annotate_refunded_items($items, $order, $types) {
+        if (!is_a($order, 'WC_Abstract_Order')) {
+            return $items;
+        }
+
+        foreach ($items as $item) {
+            // Only product line items carry a shippable quantity.
+            if (!($item instanceof WC_Order_Item_Product)) {
+                continue;
+            }
+
+            $name = $item->get_name();
+
+            // Idempotency guard: get_items() may be called several times per
+            // request, so never double-annotate a name we already flagged.
+            if (strpos($name, self::REFUND_MARKER) !== false) {
+                continue;
+            }
+
+            $ordered_qty = (int) $item->get_quantity();
+            if ($ordered_qty <= 0) {
+                continue;
+            }
+
+            // get_qty_refunded_for_item() returns 0 or a negative number.
+            $refunded_qty = abs((int) $order->get_qty_refunded_for_item($item->get_id()));
+            if ($refunded_qty <= 0) {
+                continue;
+            }
+
+            if ($refunded_qty >= $ordered_qty) {
+                $name .= ' — *** FULLY REFUNDED — DO NOT PACK ***';
+                $pack_qty = 0;
+            } else {
+                $pack_qty = $ordered_qty - $refunded_qty;
+                $name .= sprintf(
+                    ' — *** %d REFUNDED — PACK ONLY %d ***',
+                    $refunded_qty,
+                    $pack_qty
+                );
+            }
+
+            $item->set_name($name);
+
+            // Show the net quantity to pack in the slip's quantity column so a
+            // packer never over-picks. Display-only: the order is not saved
+            // during PDF generation, so the real line item is untouched.
+            $item->set_quantity($pack_qty);
+        }
+
+        return $items;
+    }
+
     /**
      * Show admin notice about excluded orders
      */
