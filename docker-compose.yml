@@ -41,6 +41,7 @@ services:
       # Mount individual plugins
       - ./woo-edit-order-item-size:/var/www/html/wp-content/plugins/woo-edit-order-item-size
       - ./woo-order-category-filter:/var/www/html/wp-content/plugins/woo-order-category-filter
+      - ./woo-garment-personalisation:/var/www/html/wp-content/plugins/woo-garment-personalisation
       # Mount WordPress data (themes, uploads, etc.)
       - wordpress_data:/var/www/html
     networks:
@@ -72,6 +73,7 @@ services:
     volumes:
       - ./woo-edit-order-item-size:/var/www/html/wp-content/plugins/woo-edit-order-item-size
       - ./woo-order-category-filter:/var/www/html/wp-content/plugins/woo-order-category-filter
+      - ./woo-garment-personalisation:/var/www/html/wp-content/plugins/woo-garment-personalisation
       - wordpress_data:/var/www/html
     environment:
       WORDPRESS_DB_HOST: db:3306
