@@ -67,9 +67,9 @@ merge as usual.
 
 ## Editing on the order screen
 
-Orders containing personalised (or personalisable) items get a **Name & Number** box on the order
-edit screen. Values can be changed on any order status; each save updates the item meta and adds
-an order note recording the old and new values.
+Values are edited through the **Edit Product** modal provided by the Edit Order Item Size plugin
+(`woo-edit-order-item-size`), which uses this plugin's validation and storage. Each save updates
+the item meta and adds an order note recording the old and new values.
 
 ## How the front end works
 

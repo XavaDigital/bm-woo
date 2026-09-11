@@ -28,7 +28,6 @@ class WGNN_Plugin {
     const META_PREFIX = '_wgnn_';         // product meta: _wgnn_name / _wgnn_number = '' (default) | off | optional | required
     const CART_KEY    = 'wgnn_fields';    // cart item data key
     const ITEM_META   = '_wgnn';          // hidden order-item meta (source of truth)
-    const NONCE       = 'wgnn_admin';
 
     /** @var bool front-end rows already printed for this request */
     protected $rendered = false;
@@ -53,8 +52,6 @@ class WGNN_Plugin {
         add_filter('woocommerce_screen_ids', array($this, 'screen_ids'));
         add_action('woocommerce_product_options_inventory_product_data', array($this, 'product_field'));
         add_action('woocommerce_process_product_meta', array($this, 'save_product_field'));
-        add_action('add_meta_boxes', array($this, 'add_order_meta_box'), 10, 2);
-        add_action('wp_ajax_wgnn_save_item', array($this, 'ajax_save_item'));
 
         add_action('before_woocommerce_init', function () {
             if (class_exists('\Automattic\WooCommerce\Utilities\FeaturesUtil')) {
@@ -471,155 +468,6 @@ class WGNN_Plugin {
             }
         }
         return $values;
-    }
-
-    /* ------------------------------------------------------------ Admin: order */
-
-    public function add_order_meta_box($post_type, $post_or_order = null) {
-        $screen = function_exists('wc_get_page_screen_id') ? wc_get_page_screen_id('shop-order') : 'shop_order';
-        if ($post_type !== 'shop_order' && $post_type !== $screen) {
-            return;
-        }
-        $order = $post_or_order instanceof WP_Post ? wc_get_order($post_or_order->ID) : $post_or_order;
-        if (!($order instanceof WC_Order) || empty($this->relevant_items($order))) {
-            return;
-        }
-        add_meta_box(
-            'wgnn_order_items',
-            __('Name & Number', 'woo-garment-personalisation'),
-            array($this, 'render_order_meta_box'),
-            $post_type,
-            'normal',
-            'default'
-        );
-    }
-
-    /**
-     * Line items that either have personalisation data or belong to an enabled product.
-     */
-    protected function relevant_items(WC_Order $order) {
-        $items = array();
-        foreach ($order->get_items() as $item_id => $item) {
-            $stored   = $item->get_meta(self::ITEM_META, true);
-            $has_data = is_array($stored) && !empty($stored);
-            $product  = $item->get_product();
-            if ($has_data || ($product && $this->is_enabled_for($product))) {
-                $items[$item_id] = $item;
-            }
-        }
-        return $items;
-    }
-
-    public function render_order_meta_box($post_or_order) {
-        $order = $post_or_order instanceof WP_Post ? wc_get_order($post_or_order->ID) : $post_or_order;
-        if (!($order instanceof WC_Order)) {
-            return;
-        }
-        $fields = $this->fields();
-        ?>
-        <p class="description"><?php esc_html_e('Edit the customer\'s name/number for each garment. Changes are saved immediately and recorded as an order note.', 'woo-garment-personalisation'); ?></p>
-        <table class="widefat striped wgnn-admin-table">
-            <thead>
-                <tr>
-                    <th><?php esc_html_e('Item', 'woo-garment-personalisation'); ?></th>
-                    <?php foreach ($fields as $def) : ?>
-                        <th><?php echo esc_html($def['label']); ?></th>
-                    <?php endforeach; ?>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-            <?php foreach ($this->relevant_items($order) as $item_id => $item) :
-                $values = $this->read_item_values($item); ?>
-                <tr data-item-id="<?php echo esc_attr($item_id); ?>">
-                    <td><strong><?php echo esc_html($item->get_name()); ?></strong> &times; <?php echo esc_html($item->get_quantity()); ?></td>
-                    <?php foreach ($fields as $key => $def) : ?>
-                        <td>
-                            <input type="text"
-                                   class="wgnn-admin-input"
-                                   data-key="<?php echo esc_attr($key); ?>"
-                                   value="<?php echo esc_attr(isset($values[$key]) ? $values[$key] : ''); ?>"
-                                   maxlength="<?php echo esc_attr($def['maxlength']); ?>"
-                                   style="width:100%" />
-                        </td>
-                    <?php endforeach; ?>
-                    <td style="white-space:nowrap">
-                        <button type="button" class="button wgnn-save"><?php esc_html_e('Save', 'woo-garment-personalisation'); ?></button>
-                        <span class="wgnn-status" aria-live="polite"></span>
-                    </td>
-                </tr>
-            <?php endforeach; ?>
-            </tbody>
-        </table>
-        <script>
-        (function ($) {
-            var nonce = <?php echo wp_json_encode(wp_create_nonce(self::NONCE)); ?>;
-            var orderId = <?php echo (int) $order->get_id(); ?>;
-            $(document).on('click', '.wgnn-admin-table .wgnn-save', function () {
-                var $btn = $(this), $row = $btn.closest('tr'), $status = $row.find('.wgnn-status');
-                var values = {};
-                $row.find('.wgnn-admin-input').each(function () { values[$(this).data('key')] = $(this).val(); });
-                $btn.prop('disabled', true);
-                $status.text('…').css('color', '');
-                $.post(ajaxurl, { action: 'wgnn_save_item', nonce: nonce, order_id: orderId, item_id: $row.data('item-id'), values: values })
-                    .done(function (res) {
-                        $status.text(res.data && res.data.message ? res.data.message : (res.success ? 'Saved' : 'Error'))
-                               .css('color', res.success ? '#008a20' : '#d63638');
-                        if (res.success && res.data && res.data.values) {
-                            $.each(res.data.values, function (k, v) { $row.find('.wgnn-admin-input[data-key="' + k + '"]').val(v); });
-                        }
-                    })
-                    .fail(function () { $status.text('Request failed').css('color', '#d63638'); })
-                    .always(function () { $btn.prop('disabled', false); });
-            });
-        })(jQuery);
-        </script>
-        <?php
-    }
-
-    public function ajax_save_item() {
-        check_ajax_referer(self::NONCE, 'nonce');
-        if (!current_user_can('edit_shop_orders')) {
-            wp_send_json_error(array('message' => __('Permission denied.', 'woo-garment-personalisation')));
-        }
-        $order = wc_get_order(isset($_POST['order_id']) ? absint($_POST['order_id']) : 0);
-        $item  = $order ? $order->get_item(isset($_POST['item_id']) ? absint($_POST['item_id']) : 0) : false;
-        if (!$order || !$item) {
-            wp_send_json_error(array('message' => __('Order item not found.', 'woo-garment-personalisation')));
-        }
-
-        $source = isset($_POST['values']) && is_array($_POST['values']) ? $_POST['values'] : array();
-        $values = $this->collect_values($source, '');
-        $errors = $this->validate_values($values);
-        if (!empty($errors)) {
-            wp_send_json_error(array('message' => implode(' ', $errors)));
-        }
-
-        $old = $this->read_item_values($item);
-        $this->apply_to_item($item, $values);
-        $item->save();
-
-        $changes = array();
-        foreach ($this->fields() as $key => $def) {
-            $before = isset($old[$key]) ? $old[$key] : '';
-            $after  = isset($values[$key]) ? $values[$key] : '';
-            if ($before !== $after) {
-                $changes[] = sprintf('%s: "%s" → "%s"', $def['label'], $before, $after);
-            }
-        }
-        if (!empty($changes)) {
-            $order->add_order_note(sprintf(
-                /* translators: 1: item name, 2: list of changes */
-                __('Name & Number updated on "%1$s" — %2$s', 'woo-garment-personalisation'),
-                $item->get_name(),
-                implode('; ', $changes)
-            ));
-        }
-
-        wp_send_json_success(array(
-            'message' => empty($changes) ? __('No changes', 'woo-garment-personalisation') : __('Saved', 'woo-garment-personalisation'),
-            'values'  => $values,
-        ));
     }
 
     /* ---------------------------------------------------------- Admin: product */
