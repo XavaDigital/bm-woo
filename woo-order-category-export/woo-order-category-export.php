@@ -620,13 +620,23 @@ class WooOrderCategoryExport {
         }
 
         // Generate and output XLSX file
-        $this->output_xlsx($filename, $headers, $data_rows);
+        // Only these columns are written as numbers. Everything else (order number, postcodes,
+        // attribute/personalisation columns such as garment Number) is written as text so
+        // leading zeros survive ("07" stays "07").
+        $numeric_columns = array(
+            0,                     // Order ID
+            count($headers) - 4,   // Quantity
+            count($headers) - 3,   // Product Total
+            count($headers) - 2,   // Order Total
+        );
+
+        $this->output_xlsx($filename, $headers, $data_rows, $numeric_columns);
     }
 
     /**
      * Output XLSX file using simple XML approach
      */
-    private function output_xlsx($filename, $headers, $data_rows) {
+    private function output_xlsx($filename, $headers, $data_rows, $numeric_columns = array()) {
         // Create temporary directory for XLSX files
         $temp_dir = sys_get_temp_dir() . '/xlsx_' . uniqid();
         mkdir($temp_dir);
@@ -714,8 +724,12 @@ class WooOrderCategoryExport {
             foreach ($row_data as $cell_value) {
                 $col++;
                 $cell_ref = $this->get_cell_reference($col, $row_num);
-                // Check if numeric
-                if (is_numeric($cell_value)) {
+                // Write as a number only for designated numeric columns, and only when the
+                // value is a plain number with no leading zero (so "07" or "0600" stay text).
+                $as_number = in_array($col - 1, $numeric_columns, true)
+                    && is_scalar($cell_value)
+                    && preg_match('/^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/', (string) $cell_value);
+                if ($as_number) {
                     $sheet .= '<c r="' . $cell_ref . '"><v>' . $cell_value . '</v></c>';
                 } else {
                     $sheet .= '<c r="' . $cell_ref . '" t="inlineStr"><is><t>' . $this->xml_escape($cell_value) . '</t></is></c>';
